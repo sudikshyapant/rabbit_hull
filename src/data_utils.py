@@ -45,7 +45,7 @@ def load_imagenet_val(config: dict):
     from datasets import load_dataset
 
     print("Loading imagenet-1k validation split (this may take a while)…")
-    ds = load_dataset("imagenet-1k", split="validation")
+    ds = load_dataset("ILSVRC/imagenet-1k", split="validation")
     print(f"Loaded {len(ds)} images.")
     return ds
 
@@ -104,7 +104,7 @@ def load_analysis_images(val_dataset, config: dict):
               f"{len(remaining)} classes (val only has 50/class)…")
         from datasets import load_dataset
 
-        train_stream = load_dataset("imagenet-1k", split="train", streaming=True)
+        train_stream = load_dataset("ILSVRC/imagenet-1k", split="train", streaming=True)
         scanned = 0
         for example in train_stream:
             scanned += 1
