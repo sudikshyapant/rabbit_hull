@@ -2,8 +2,8 @@
 
 The stable SAE constrains dictionary atoms to lie in conv(A). Following the
 paper, we approximate conv(A) with a set of centroids (paper: 128,000 over
-1.4M images; here: 4,000 over a subsample of our 45,000-image sae_train
-split — see README.md).
+1.4M images; here: 4,000 over a subsample of our sae_train split — see
+README.md).
 """
 
 import numpy as np

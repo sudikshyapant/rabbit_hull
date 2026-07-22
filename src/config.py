@@ -42,9 +42,14 @@ CONFIG = {
     "n_tokens": 261,  # 256 patch + 1 cls + 4 register tokens
     "batch_size": 32,
     "device": "cuda" if torch.cuda.is_available() else "cpu",
-    # Data (ImageNet-1k validation split, used for both SAE training and analysis)
-    "n_sae_train": 45_000,      # paper: 1.4M train images
-    "n_analysis": 5_000,        # held out for downstream-task/geometry analysis (later phases)
+    # Data
+    # sae_train: random sample from the val split, over all classes except the
+    #   200 analysis classes below (paper: 1.4M train images).
+    # analysis: ~75 images/class over the 200 curated ImageNet-200 classes
+    #   (imagenet200.py) — 50/class from val, the rest streamed from train.
+    #   Chosen over fewer classes with more images/class: see README.md.
+    "n_sae_train": 18_000,
+    "n_analysis": 15_000,
     "random_state": 42,
     # Stable SAE
     "n_atoms": 1_000,           # paper: 32,000

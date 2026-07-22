@@ -31,8 +31,9 @@ def extract_activations(images: list, model, processor, config: dict) -> torch.T
     Tensor of shape (len(images), n_tokens, d_model), dtype float16, on CPU.
 
     Note: the full result is held in CPU RAM before the caller writes it to
-    disk (~18GB for 45,000 images at fp16). Reduce n_sae_train in config.py
-    if this doesn't fit your Colab runtime's RAM.
+    disk (~0.4GB per 1,000 images at fp16 — e.g. ~12GB for 30,000 images).
+    Reduce n_sae_train/n_analysis in config.py if this doesn't fit your Colab
+    runtime's RAM or Drive quota.
     """
     device = config["device"]
     batch_size = config["batch_size"]
