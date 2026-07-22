@@ -1,0 +1,9 @@
+torch
+transformers
+datasets
+huggingface_hub
+scikit-learn
+numpy
+matplotlib
+tqdm
+pillow
