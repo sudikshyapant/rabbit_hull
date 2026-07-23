@@ -3,6 +3,7 @@ transformers
 datasets
 huggingface_hub
 scikit-learn
+scipy
 numpy
 matplotlib
 tqdm

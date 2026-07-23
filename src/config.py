@@ -59,6 +59,28 @@ CONFIG = {
     "sae_epochs": 50,           # paper: 50
     "sae_lr": 1e-3,             # not specified in paper; chosen default
     "sae_batch_size": 4_096,    # tokens per SGD step; not specified in paper
+    # Classification / segmentation probes (Sections 6-7)
+    "n_segmentation": 2_000,    # ADE20K (scene_parse_150) val images used for analysis
+    "probe_C": 1.0,             # LogisticRegression inverse-regularization for both probes
+    # Elsewhere-concept RISE verification (paper: 8000 masks/image, all classes)
+    "rise_n_masks": 300,
+    "rise_images_per_class": 3,
+    "rise_n_classes": 10,       # top-10 classes by classification phi score
+    "rise_mask_grid": 8,        # low-res mask grid upsampled to the 16x16 patch grid
+    "rise_mask_prob": 0.5,
+    # Dictionary geometry baselines (Sections 9-11)
+    "grassmannian_steps": 3_000,  # frame-potential-minimization steps (approx TAAP; c=1000 is small)
+    "grassmannian_lr": 0.05,
+    "antipodal_threshold": -0.9,
+    # Position-embedding analysis (Section 12; paper: 1M images; not persisted to Drive, see model_utils)
+    "n_position": 1_000,
+    "position_layers": None,    # None = all 13 hidden-state layers (0=embeddings..12=last)
+    # MRH empirical evidence (Section 14)
+    "n_mrh_tokens": 5_000,      # sampled tokens for the k-NN geodesic experiment
+    "knn_k": 15,                # not specified in paper beyond "standard"; documented choice
+    "n_aa_images": 20,          # images used for per-image Archetypal Analysis sweep
+    "aa_archetype_counts": [3, 5, 8, 10, 15, 20, 30],
+    "aa_iters": 200,
     # I/O
     "cache_dir": _cache_dir,
     "results_dir": _results_dir,

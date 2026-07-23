@@ -48,3 +48,32 @@ def extract_activations(images: list, model, processor, config: dict) -> torch.T
         all_tokens.append(tokens.half().cpu())
 
     return torch.cat(all_tokens, dim=0)
+
+
+def extract_all_layer_activations(images: list, model, processor, config: dict) -> torch.Tensor:
+    """Run DINOv2 forward passes and return tokens from every hidden-state layer.
+
+    Used only by the position-embedding analysis (`position_utils.py`), which
+    needs per-layer accuracy/rank curves. Deliberately NOT wrapped in
+    `utils.cached()` / not written to Drive: even at `config["n_position"]`
+    (default 1,000) images this is ~10GB dense fp16 across the model's 13
+    hidden-state layers — cheaper to recompute (a few minutes on a Colab GPU)
+    than to store.
+
+    Returns
+    -------
+    Tensor of shape (len(images), n_layers, n_tokens, d_model), dtype float16, on CPU.
+    """
+    device = config["device"]
+    batch_size = config["batch_size"]
+    all_tokens = []
+
+    for i in tqdm(range(0, len(images), batch_size), desc="Extracting per-layer activations"):
+        batch = images[i : i + batch_size]
+        inputs = processor(images=batch, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out = model(**inputs, output_hidden_states=True)
+        layers = torch.stack(out.hidden_states, dim=1)  # (B, n_layers, n_tokens, d_model)
+        all_tokens.append(layers.half().cpu())
+
+    return torch.cat(all_tokens, dim=0)

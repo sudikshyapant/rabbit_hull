@@ -9,13 +9,28 @@ curated ImageNet-200 classes (imagenet200.py) — val only has 50 images/class,
 so we fill any remainder per class by streaming (not downloading) matching
 images from the *train* split. See README.md for why 200 classes over more
 images/class was chosen.
+
+IMPORTANT: we load via the generic "parquet" builder pointed at explicit
+hf:// file globs, NOT via load_dataset("ILSVRC/imagenet-1k", ...). Going
+through that repo's own loader — even with a `data_files` argument meant to
+scope it to one split — was observed (twice) to resolve and download every
+split's parquet shards anyway (~150GB, ~1-2 hours). The generic "parquet"
+loader has no such repo-specific logic: it can only ever touch files that
+match the glob we hand it. Run `smoke_test()` before a full load to confirm
+this on a single ~480MB file before committing to the real (~6-7GB) pull.
 """
 
 import os
 
 import numpy as np
 
-from imagenet200 import IMAGENET200_WNIDS
+from imagenet200 import IMAGENET200_LABEL_IDS, IMAGENET200_WNIDS
+
+_WNID_TO_LABEL_ID = dict(zip(IMAGENET200_WNIDS, IMAGENET200_LABEL_IDS))
+
+REPO = "ILSVRC/imagenet-1k"
+VAL_GLOB = f"hf://datasets/{REPO}/data/validation-*.parquet"
+TRAIN_GLOB = f"hf://datasets/{REPO}/data/train-*.parquet"
 
 
 def _hf_login() -> None:
@@ -39,21 +54,74 @@ def _hf_login() -> None:
         print("Authenticated with HuggingFace via HF_TOKEN env var.")
 
 
+def _check_standard_ordering(dataset) -> None:
+    """Verify *dataset*'s label ints follow the standard ILSVRC2012 ordering.
+
+    `features["label"].names` holds human-readable descriptions
+    ("tench, Tinca tinca"), not WNIDs — there's no WNID string to match
+    against it. Instead, imagenet200.py hardcodes each WNID's index in the
+    standard ordering (WNIDs sorted alphabetically), verified against the
+    canonical Keras/TF imagenet_class_index.json. This check confirms that
+    assumption holds for *this* dataset — index 1 should always be goldfish
+    — so a future dataset revision with different ordering fails loudly
+    here rather than silently mislabeling every image.
+    """
+    names = getattr(dataset.features["label"], "names", None)
+    if names is None or len(names) != 1000 or "goldfish" not in names[1].lower():
+        got = None if names is None else names[1]
+        raise RuntimeError(
+            "Dataset's label ordering doesn't match the standard ILSVRC2012 "
+            f"ordering this code assumes (expected index 1 to be 'goldfish', "
+            f"got {got!r}). The WNID->label-id mapping in imagenet200.py "
+            "won't be correct here — stop and let me know before proceeding."
+        )
+
+
+def smoke_test() -> None:
+    """Fast (~1 file, ~480MB) check that the glob-scoped loading actually works.
+
+    Run this FIRST, before load_imagenet_val(). Confirms, without a multi-GB
+    commitment: (1) only the requested file is fetched — no train shards —
+    and (2) the dataset's label ordering matches what imagenet200.py assumes
+    (see _check_standard_ordering).
+    """
+    _hf_login()
+    from datasets import load_dataset
+
+    one_file = f"hf://datasets/{REPO}/data/validation-00000-of-00014.parquet"
+    print(f"Smoke test: loading a single file ({one_file})…")
+    ds = load_dataset("parquet", data_files={"validation": one_file}, split="validation")
+    print(f"Loaded {len(ds)} rows from one file (expect ~3,500, i.e. 50,000/14).")
+
+    _check_standard_ordering(ds)
+    print("Label ordering OK (matches standard ILSVRC2012 ordering).")
+    print("Smoke test passed — safe to run load_imagenet_val().")
+
+
 def load_imagenet_val(config: dict):
-    """Load the ImageNet-1k validation split (50,000 images) from HuggingFace."""
+    """Load the ImageNet-1k validation split (50,000 images) from HuggingFace.
+
+    Only ever touches files matching VAL_GLOB (see module docstring for why
+    we don't go through the repo's own loading script).
+    """
     _hf_login()
     from datasets import load_dataset
 
     print("Loading imagenet-1k validation split (this may take a while)…")
-    ds = load_dataset("ILSVRC/imagenet-1k", split="validation")
+    ds = load_dataset("parquet", data_files={"validation": VAL_GLOB}, split="validation")
     print(f"Loaded {len(ds)} images.")
     return ds
 
 
 def _label_ids_for_wnids(dataset, wnids: list[str]) -> list[int]:
-    """Map WordNet IDs to *dataset*'s integer label ids (via its ClassLabel feature)."""
-    names = dataset.features["label"].names
-    return [names.index(w) for w in wnids]
+    """Map WordNet IDs to *dataset*'s integer label ids.
+
+    Uses the fixed, verified imagenet200.py mapping (see its module
+    docstring) rather than dataset.features["label"].names, which holds
+    descriptions, not WNIDs. _check_standard_ordering guards the assumption.
+    """
+    _check_standard_ordering(dataset)
+    return [_WNID_TO_LABEL_ID[w] for w in wnids]
 
 
 def make_sae_train_split(val_dataset, config: dict) -> np.ndarray:
@@ -80,7 +148,7 @@ def load_analysis_images(val_dataset, config: dict):
     taken in dataset order), then streams the train split — filtered to only
     these 200 classes, stopping as soon as every class is topped up — to fill
     the rest of each class's target_per_class quota. Streaming means we only
-    download the images we actually keep, not the full train set.
+    fetch the images we actually keep, not the full train set.
 
     Returns
     -------
@@ -104,7 +172,9 @@ def load_analysis_images(val_dataset, config: dict):
               f"{len(remaining)} classes (val only has 50/class)…")
         from datasets import load_dataset
 
-        train_stream = load_dataset("ILSVRC/imagenet-1k", split="train", streaming=True)
+        train_stream = load_dataset(
+            "parquet", data_files={"train": TRAIN_GLOB}, split="train", streaming=True
+        )
         scanned = 0
         for example in train_stream:
             scanned += 1

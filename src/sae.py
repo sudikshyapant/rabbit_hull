@@ -110,3 +110,71 @@ def load_checkpoint(centroids: torch.Tensor, config: dict) -> StableSAE:
     sae = StableSAE(centroids, config["n_atoms"], config["sparsity_k"], config["d_model"])
     sae.load_state_dict(torch.load(path, weights_only=True))
     return sae
+
+
+def encode_sparse(
+    sae: StableSAE, activations: torch.Tensor, config: dict, batch_size: int = 4_096
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Encode *activations* through *sae*, keeping only the top-k nonzero codes per token.
+
+    A dense (n, t, n_atoms) code tensor would be ~7.8GB at 15,000 analysis
+    images / n_atoms=1000 (well past this repo's Drive budget), so this keeps
+    just the per-token indices/values that BatchTopK leaves nonzero — see
+    `densify` to reconstruct a dense tensor transiently when needed.
+
+    Parameters
+    ----------
+    activations : (n_images, n_tokens, d_model) tensor
+
+    Returns
+    -------
+    indices : (n_images, n_tokens, k) int32 — atom ids of the nonzero codes
+    values  : (n_images, n_tokens, k) float16 — corresponding code values
+    """
+    device = config["device"]
+    sae.to(device)
+    sae.eval()
+
+    n_images, n_tokens, d_model = activations.shape
+    k = sae.sparsity_k
+    tokens = activations.reshape(-1, d_model).float()
+
+    all_indices, all_values = [], []
+    with torch.no_grad():
+        for i in range(0, len(tokens), batch_size):
+            batch = tokens[i : i + batch_size].to(device)
+            preact = torch.relu(sae.encoder(batch))
+            # Per-token top-k (not BatchTopK): the paper's sparsity constraint
+            # |supp(z)| <= k is defined per token (Definition 1); BatchTopK is
+            # only a training-time relaxation for stable gradients.
+            values, indices = torch.topk(preact, k, dim=1)
+            all_indices.append(indices.to(torch.int32).cpu())
+            all_values.append(values.half().cpu())
+
+    indices = torch.cat(all_indices, dim=0).reshape(n_images, n_tokens, k)
+    values = torch.cat(all_values, dim=0).reshape(n_images, n_tokens, k)
+    return indices, values
+
+
+def densify(indices: torch.Tensor, values: torch.Tensor, n_atoms: int) -> torch.Tensor:
+    """Scatter sparse (indices, values) from `encode_sparse` back to a dense (n, t, n_atoms) tensor."""
+    shape = indices.shape[:-1] + (n_atoms,)
+    dense = torch.zeros(shape, dtype=values.dtype)
+    dense.scatter_(-1, indices.long(), values)
+    return dense
+
+
+def encode_dense(sae: StableSAE, tokens: torch.Tensor) -> torch.Tensor:
+    """Per-token top-k encode for a small in-memory batch already on the model's device.
+
+    Unlike `encode_sparse` (which is for caching a whole dataset to disk),
+    this returns a dense tensor directly, staying on-device — used where a
+    handful of images are encoded on the fly (RISE masking, per-image
+    Archetypal Analysis comparisons) and a CPU round-trip would just be
+    wasted overhead.
+    """
+    preact = torch.relu(sae.encoder(tokens))
+    values, indices = torch.topk(preact, sae.sparsity_k, dim=-1)
+    dense = torch.zeros_like(preact)
+    dense.scatter_(-1, indices, values)
+    return dense
