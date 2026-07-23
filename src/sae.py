@@ -38,7 +38,22 @@ class StableSAE(nn.Module):
         self.sparsity_k = sparsity_k
         self.register_buffer("centroids", centroids)  # (n_centroids, d_model), fixed
         self.encoder = nn.Linear(d_model, n_atoms)
-        self.s_logits = nn.Parameter(torch.randn(n_atoms, centroids.shape[0]) * 0.01)
+
+        # Initialize each atom at a distinct centroid rather than a uniform
+        # blend of all of them. A near-zero-logit init makes softmax(s_logits)
+        # start ~uniform over all n_centroids for *every* atom, so every D_i
+        # starts ~= mean(centroids) -- atoms begin nearly identical, leaving
+        # almost no gradient signal for *which* atom should fire (swapping
+        # atoms barely changes an already-identical reconstruction). That
+        # starves training and shows up as a fast initial drop followed by a
+        # hard early plateau. Concentrating each atom's initial softmax mass
+        # on one (distinct, since n_centroids > n_atoms) centroid instead
+        # gives every atom a genuinely different starting direction.
+        n_centroids = centroids.shape[0]
+        init_idx = torch.randperm(n_centroids)[:n_atoms]
+        s_logits = torch.full((n_atoms, n_centroids), -5.0)
+        s_logits[torch.arange(n_atoms), init_idx] = 5.0
+        self.s_logits = nn.Parameter(s_logits)
 
     def dictionary(self) -> torch.Tensor:
         """D = softmax(s_logits, dim=centroids) @ C  — each atom is a convex mix of C."""
